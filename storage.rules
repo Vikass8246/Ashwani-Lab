@@ -1,0 +1,51 @@
+
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Helper function to check if a user is a staff member
+    function isStaff() {
+      return exists(/databases/$(database)/documents/ashwani/data/staff/$(request.auth.uid));
+    }
+    
+    // Helper function to check if a user is a phlebotomist
+    function isPhlebo() {
+      return exists(/databases/$(database)/documents/ashwani/data/phlebos/$(request.auth.uid));
+    }
+
+    // Reports can only be read by the patient they belong to,
+    // and can only be created or updated by staff. Deletion is disallowed.
+    match /reports/{appointmentId}/{fileName} {
+      // Allow patient and staff to download reports.
+      allow read: if request.auth != null && (
+                    request.auth.uid == get(/databases/$(database)/documents/ashwani/data/appointments/$(appointmentId)).data.patientId || 
+                    isStaff()
+                  );
+
+      // Allow staff to upload a new report.
+      allow create, update: if isStaff();
+
+      // DELETE rule: Do not allow anyone to delete files.
+      allow delete: if false;
+    }
+
+    // Prescriptions can be created by patients, and read by staff/phlebos
+    match /prescriptions/{appointmentId}/{fileName} {
+       // Allow patient, staff, and phlebos to read the prescription.
+       allow read: if request.auth != null && (
+                    request.auth.uid == get(/databases/$(database)/documents/ashwani/data/appointments/$(appointmentId)).data.patientId || 
+                    isStaff() ||
+                    isPhlebo()
+                  );
+
+       // Allow patient to upload a prescription for their own appointment.
+       allow create: if request.auth != null && 
+                      request.auth.uid == request.resource.metadata.patientId &&
+                      request.resource.size < 5 * 1024 * 1024 && // Max 5MB
+                      request.resource.contentType.matches('image/.*|application/pdf');
+
+       allow delete: if false;
+    }
+  }
+}
